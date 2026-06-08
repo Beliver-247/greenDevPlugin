@@ -1,0 +1,270 @@
+pipeline {
+    agent any
+
+    parameters {
+        booleanParam(
+            name: 'DRY_RUN',
+            defaultValue: false,
+            description: 'When true, only run the optimizer analysis without building, testing, or deploying.'
+        )
+    }
+
+    environment {
+        DOCKER_HUB_CREDENTIALS = credentials('dockerhub-dumindu-credentials')
+        DOCKER_IMAGE           = 'beliver247/green-release-app'
+        DOCKER_TAG             = "${BUILD_NUMBER}"
+
+        REMOTE_HOST            = '147.15.144.192'
+        REMOTE_PORT            = '2510'
+        REMOTE_USER            = 'dumindu'
+        SSH_CREDENTIALS        = 'ubuntu-pc-ssh-dumindu'
+
+        METRICS_URL            = 'http://192.168.9.127:5001'
+    }
+
+    stages {
+        stage('Notify Start') {
+            steps {
+                sh """
+                    curl -s -X POST ${METRICS_URL}/deployment/start \
+                        -H "Content-Type: application/json" \
+                        -d '{"job_name":"${JOB_NAME}","build_number":"${BUILD_NUMBER}"}'
+                """
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/Beliver-247/green-release-demo.git',
+                        credentialsId: 'github-dumindu-credentials'
+                    ]],
+                    extensions: [[ $class: 'CloneOption', shallow: false, depth: 0, noTags: false ]]
+                ])
+            }
+        }
+
+        stage('Build Optimizer - Analyze') {
+            steps {
+                script {
+                    sh 'docker pull --platform linux/amd64 beliver247/build-optimizer-agent:latest'
+
+                    def output = sh(
+                        script: '''
+                            set -e
+                            tar -C "$PWD" -cf - . | docker run --rm -i --platform linux/amd64 \
+                              -v /var/run/docker.sock:/var/run/docker.sock \
+                              beliver247/build-optimizer-agent:latest \
+                              bash -lc '
+                                set -e
+                                mkdir -p /work
+                                tar -xf - -C /work
+                                cd /work
+
+                                git config --global --add safe.directory /work
+
+                                HEAD_SHA=$(git rev-parse --verify HEAD)
+                                if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+                                  BASE_SHA=$(git rev-parse --verify HEAD~1)
+                                else
+                                  BASE_SHA=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+                                fi
+
+                                python3 -m optimizer \
+                                  --base "$BASE_SHA" \
+                                  --head "$HEAD_SHA" \
+                                  --project-root /work \
+                                  --dry-run true \
+                                  --output-format json
+                              '
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    echo '=== Build Optimizer Output ==='
+                    echo output
+                    echo '=============================='
+
+                    def jsonLine = output.readLines().find { it.startsWith('{"') }
+                    if (jsonLine) {
+                        def result = new groovy.json.JsonSlurper().parseText(jsonLine)
+                        env.OPTIMIZER_STATUS = result.status ?: 'unknown'
+
+                        def buildCommands = []
+                        def testCommands = []
+                        for (action in result.actions ?: []) {
+                            if (action.name == 'build') {
+                                buildCommands.add(action.command.join(' '))
+                            } else if (action.name == 'test') {
+                                testCommands.add(action.command.join(' '))
+                            }
+                        }
+
+                        env.MAVEN_BUILD_COMMANDS = buildCommands.join('|||')
+                        env.MAVEN_TEST_COMMANDS = testCommands.join('|||')
+                        env.AFFECTED_MODULES = (result.affected_modules ?: []).join(',')
+
+                        echo "Optimizer status: ${env.OPTIMIZER_STATUS}"
+                        echo "Affected modules: ${env.AFFECTED_MODULES}"
+                        echo "Build commands: ${env.MAVEN_BUILD_COMMANDS}"
+                        echo "Test commands: ${env.MAVEN_TEST_COMMANDS}"
+                    } else {
+                        env.OPTIMIZER_STATUS = 'no_changes'
+                        env.MAVEN_BUILD_COMMANDS = ''
+                        env.MAVEN_TEST_COMMANDS = ''
+                        env.AFFECTED_MODULES = ''
+                    }
+
+                    if (params.DRY_RUN) {
+                        echo '=== DRY RUN MODE — Skipping build, test, Docker, and deploy stages ==='
+                    }
+                }
+            }
+        }
+
+        stage('Selective Build') {
+            when {
+                expression { !params.DRY_RUN && env.OPTIMIZER_STATUS == 'success' && env.MAVEN_BUILD_COMMANDS?.trim() }
+            }
+            steps {
+                script {
+                    echo "Running selective Maven build for modules: ${env.AFFECTED_MODULES}"
+                    env.MAVEN_BUILD_COMMANDS.split('\\|\\|\\|').each { cmd ->
+                        echo "Executing: ${cmd}"
+                        sh cmd
+                    }
+                }
+            }
+        }
+
+        stage('Selective Test') {
+            when {
+                expression { !params.DRY_RUN && env.OPTIMIZER_STATUS == 'success' && env.MAVEN_TEST_COMMANDS?.trim() }
+            }
+            steps {
+                script {
+                    echo "Running selective tests for modules: ${env.AFFECTED_MODULES}"
+                    env.MAVEN_TEST_COMMANDS.split('\\|\\|\\|').each { cmd ->
+                        echo "Executing: ${cmd}"
+                        sh cmd
+                    }
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            when {
+                expression { !params.DRY_RUN && env.OPTIMIZER_STATUS == 'success' }
+            }
+            steps {
+                dir('app') {
+                    sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} -t ${DOCKER_IMAGE}:latest ."
+                }
+            }
+        }
+
+        stage('Docker Push') {
+            when {
+                expression { !params.DRY_RUN && env.OPTIMIZER_STATUS == 'success' }
+            }
+            steps {
+                sh """
+                    echo "${DOCKER_HUB_CREDENTIALS_PSW}" | docker login -u "${DOCKER_HUB_CREDENTIALS_USR}" --password-stdin
+                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker push ${DOCKER_IMAGE}:latest
+                    docker logout
+                """
+            }
+        }
+
+        stage('Deploy to Server') {
+            when {
+                expression { !params.DRY_RUN && env.OPTIMIZER_STATUS == 'success' }
+            }
+            steps {
+                sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
+                            ${REMOTE_USER}@${REMOTE_HOST} \
+                            'mkdir -p /home/${REMOTE_USER}/green-release-demo'
+                    """
+
+                    sh """
+                        scp -o StrictHostKeyChecking=no -P ${REMOTE_PORT} \
+                            docker-compose.yml \
+                            ${REMOTE_USER}@${REMOTE_HOST}:/home/${REMOTE_USER}/green-release-demo/docker-compose.yml
+                    """
+
+                    sh """
+                        ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
+                            ${REMOTE_USER}@${REMOTE_HOST} '
+                                set -e
+                                cd /home/${REMOTE_USER}/green-release-demo
+                                docker pull ${DOCKER_IMAGE}:latest
+                                docker-compose down || true
+                                docker-compose up -d
+                                sleep 15
+                                docker-compose ps
+                            '
+                    """
+                }
+            }
+        }
+
+        stage('Smoke Test') {
+            when {
+                expression { !params.DRY_RUN && env.OPTIMIZER_STATUS == 'success' }
+            }
+            steps {
+                sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} \
+                            ${REMOTE_USER}@${REMOTE_HOST} \
+                            'curl -sf http://localhost:8081/health && echo "SMOKE TEST PASSED" || exit 1'
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            script {
+                if (params.DRY_RUN) {
+                    echo "DRY RUN COMPLETE — Build #${BUILD_NUMBER} — Analysis only, no changes deployed"
+                } else if (env.OPTIMIZER_STATUS == 'success') {
+                    echo "Deployment SUCCESSFUL — Build #${BUILD_NUMBER} (modules: ${env.AFFECTED_MODULES})"
+                } else {
+                    echo "Pipeline COMPLETE — Build #${BUILD_NUMBER} — No code changes to deploy (status: ${env.OPTIMIZER_STATUS})"
+                }
+
+                if (env.METRICS_URL?.trim()) {
+                    sh """
+                        curl -s -X POST ${METRICS_URL}/deployment/end \
+                            -H "Content-Type: application/json" \
+                            -d '{"status":"SUCCESS","build_number":"${BUILD_NUMBER}","image":"${DOCKER_IMAGE}:${DOCKER_TAG}"}' || true
+                    """
+                }
+            }
+        }
+        failure {
+            echo "Deployment FAILED — Build #${BUILD_NUMBER}"
+            script {
+                if (env.METRICS_URL?.trim()) {
+                    sh """
+                        curl -s -X POST ${METRICS_URL}/deployment/end \
+                            -H "Content-Type: application/json" \
+                            -d '{"status":"FAILURE","build_number":"${BUILD_NUMBER}"}' || true
+                    """
+                }
+            }
+        }
+        always {
+            sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true"
+            sh "docker image prune -f || true"
+        }
+    }
+}

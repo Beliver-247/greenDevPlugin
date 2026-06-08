@@ -1,0 +1,35 @@
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/opt/build-optimizer
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        maven \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) docker_arch='x86_64' ;; \
+      arm64) docker_arch='aarch64' ;; \
+      *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    docker_version='27.3.1'; \
+    curl -fsSL "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${docker_version}.tgz" -o /tmp/docker.tgz; \
+    tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1 docker/docker; \
+    rm -f /tmp/docker.tgz
+
+WORKDIR /opt/build-optimizer
+
+COPY optimizer/ /opt/build-optimizer/optimizer/
+COPY config/ /opt/build-optimizer/config/
+
+RUN python -m compileall /opt/build-optimizer/optimizer
+
+CMD ["bash"]

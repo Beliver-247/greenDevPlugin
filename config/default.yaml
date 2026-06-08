@@ -1,0 +1,62 @@
+git:
+  base_ref: HEAD~1
+  head_ref: HEAD
+
+# Leave modules empty to auto-discover modules from the root pom.xml or
+# top-level directories containing pom.xml. Configure explicitly when module
+# names differ from paths or when only a subset should be considered.
+modules: []
+# Example:
+# modules:
+#   - name: auth-service
+#     path: auth-service/
+#   - name: billing-service
+#     path: services/billing-service/
+
+shared_modules:
+  - common-lib
+
+rules:
+  skip_non_code_changes: true
+  doc_only_extensions:
+    - .adoc
+    - .asciidoc
+    - .drawio
+    - .gif
+    - .jpeg
+    - .jpg
+    - .markdown
+    - .md
+    - .pdf
+    - .png
+    - .rst
+    - .svg
+    - .txt
+  doc_file_names:
+    - changelog
+    - license
+    - readme
+    - readme.md
+  global_trigger_paths:
+    - pom.xml
+    - .mvn/
+    - mvnw
+    - mvnw.cmd
+    - settings.xml
+
+maven:
+  executable: mvn
+  group_id: null
+  also_make: true
+  also_make_tests: false
+  extra_args: []
+  build_goals:
+    - clean
+    - install
+  test_goals:
+    - test
+  run_build: true
+  run_tests: true
+
+output:
+  format: json
