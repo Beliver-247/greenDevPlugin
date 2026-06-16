@@ -75,6 +75,19 @@ class OutputConfig:
 
 
 @dataclass(frozen=True)
+class CarbonAwareConfig:
+    """Settings for the carbon-aware scheduling subsystem."""
+
+    provider: str = "mock"                    # "mock" | "electricity_maps"
+    electricity_maps_api_key: str | None = None
+    electricity_maps_zone: str = "LK"
+    model_path: str | None = None             # None → use bundled model
+    history_store_path: str = "~/.greendevops/carbon_history.json"
+    min_history_hours: int = 3
+    backfill_on_empty: bool = True
+
+
+@dataclass(frozen=True)
 class OptimizerConfig:
     """Complete runtime configuration for the optimizer."""
 
@@ -87,6 +100,7 @@ class OptimizerConfig:
     rules: RulesConfig = RulesConfig()
     maven: MavenConfig = MavenConfig()
     output: OutputConfig = OutputConfig()
+    carbon_aware: CarbonAwareConfig = CarbonAwareConfig()
 
 
 def load_config(config_path: Path | None, project_root: Path) -> OptimizerConfig:
@@ -193,11 +207,13 @@ def _merge_config(default: OptimizerConfig, data: Mapping[str, Any]) -> Optimize
     rules_data = _as_mapping(data.get("rules"), "rules")
     maven_data = _as_mapping(data.get("maven"), "maven")
     output_data = _as_mapping(data.get("output"), "output")
+    carbon_aware_data = _as_mapping(data.get("carbon_aware"), "carbon_aware")
 
     modules = _parse_modules(data.get("modules", default.modules))
     rules = _parse_rules(default.rules, rules_data)
     maven = _parse_maven(default.maven, maven_data)
     output = _parse_output(default.output, output_data)
+    carbon_aware = _parse_carbon_aware(default.carbon_aware, carbon_aware_data)
 
     return replace(
         default,
@@ -209,6 +225,7 @@ def _merge_config(default: OptimizerConfig, data: Mapping[str, Any]) -> Optimize
         rules=rules,
         maven=maven,
         output=output,
+        carbon_aware=carbon_aware,
     )
 
 
@@ -281,6 +298,27 @@ def _parse_output(default: OutputConfig, data: Mapping[str, Any]) -> OutputConfi
         raise ConfigurationError("output.format must be one of: json, key-value, none.")
 
     return OutputConfig(format=output_format)
+
+
+def _parse_carbon_aware(default: CarbonAwareConfig, data: Mapping[str, Any]) -> CarbonAwareConfig:
+    provider = _as_str(data.get("provider", default.provider)).lower()
+    if provider not in {"mock", "electricity_maps"}:
+        raise ConfigurationError(
+            "carbon_aware.provider must be 'mock' or 'electricity_maps'."
+        )
+
+    api_key = data.get("electricity_maps_api_key", default.electricity_maps_api_key)
+    model_path = data.get("model_path", default.model_path)
+
+    return CarbonAwareConfig(
+        provider=provider,
+        electricity_maps_api_key=None if api_key in (None, "", "null") else _as_str(api_key),
+        electricity_maps_zone=_as_str(data.get("electricity_maps_zone", default.electricity_maps_zone)),
+        model_path=None if model_path in (None, "", "null") else _as_str(model_path),
+        history_store_path=_as_str(data.get("history_store_path", default.history_store_path)),
+        min_history_hours=int(data.get("min_history_hours", default.min_history_hours)),
+        backfill_on_empty=_as_bool(data.get("backfill_on_empty", default.backfill_on_empty), "carbon_aware.backfill_on_empty"),
+    )
 
 
 def _as_mapping(value: Any, name: str) -> Mapping[str, Any]:

@@ -133,7 +133,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.carbon_aware:
             from .scheduler import run_scheduler
 
-            payload["scheduling"] = run_scheduler(payload)
+            carbon_aware_cfg = {
+                "provider": config.carbon_aware.provider,
+                "electricity_maps_api_key": config.carbon_aware.electricity_maps_api_key,
+                "electricity_maps_zone": config.carbon_aware.electricity_maps_zone,
+                "model_path": config.carbon_aware.model_path,
+                "history_store_path": config.carbon_aware.history_store_path,
+                "min_history_hours": config.carbon_aware.min_history_hours,
+                "backfill_on_empty": config.carbon_aware.backfill_on_empty,
+            }
+            payload["scheduling"] = run_scheduler(payload, carbon_aware_config=carbon_aware_cfg)
 
         return finish(
             payload,

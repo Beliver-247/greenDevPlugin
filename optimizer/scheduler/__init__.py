@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .predictor import GreenWindowPredictor
+from .history_store import CarbonHistoryStore
+from .predictor import GreenWindowPredictor, PredictorUnavailableError
 from .scheduler import run_scheduler
 
-__all__ = ["GreenWindowPredictor", "run_scheduler"]
+__all__ = ["CarbonHistoryStore", "GreenWindowPredictor", "PredictorUnavailableError", "run_scheduler"]

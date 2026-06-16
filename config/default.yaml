@@ -60,3 +60,35 @@ maven:
 
 output:
   format: json
+
+# Carbon-aware scheduling configuration.
+# Used when --carbon-aware flag is passed to the optimizer CLI.
+carbon_aware:
+  # "mock" uses hard-coded values (no API key needed, good for testing/CI demo).
+  # "electricity_maps" calls the real Electricity Maps API v4.
+  provider: mock
+
+  # Electricity Maps API key. Can also be set via the ELECTRICITY_MAPS_API_KEY
+  # environment variable (takes priority over this setting).
+  electricity_maps_api_key: null
+
+  # Grid zone for Electricity Maps queries. Sri Lanka = LK.
+  electricity_maps_zone: LK
+
+  # Path to the trained LightGBM model file (.joblib).
+  # Leave null to use the model bundled with the plugin.
+  model_path: null
+
+  # Local file used to cache the rolling 168-hour carbon intensity history.
+  # The scheduler appends to this file on each invocation.
+  history_store_path: ~/.greendevops/carbon_history.json
+
+  # Minimum number of recent hours in the history buffer before the ML model
+  # is used. Below this threshold the rule-based engine is used instead (with
+  # a console warning).
+  min_history_hours: 3
+
+  # When true, automatically backfill the last 168 hours from the API on the
+  # first invocation (or when the history store is stale / empty).
+  backfill_on_empty: true
+

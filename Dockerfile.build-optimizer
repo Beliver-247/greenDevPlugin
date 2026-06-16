@@ -25,6 +25,13 @@ RUN set -eux; \
     tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1 docker/docker; \
     rm -f /tmp/docker.tgz
 
+# Install ML dependencies for the green-window LightGBM classifier.
+RUN pip install --no-cache-dir \
+    joblib \
+    lightgbm \
+    numpy \
+    scikit-learn
+
 WORKDIR /opt/build-optimizer
 
 COPY optimizer/ /opt/build-optimizer/optimizer/
