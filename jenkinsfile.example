@@ -78,7 +78,8 @@ pipeline {
                                   --head "$HEAD_SHA" \
                                   --project-root /work \
                                   --dry-run true \
-                                  --output-format json
+                                  --output-format json \
+                                  --carbon-aware
                               '
                         ''',
                         returnStdout: true
@@ -111,6 +112,19 @@ pipeline {
                         echo "Affected modules: ${env.AFFECTED_MODULES}"
                         echo "Build commands: ${env.MAVEN_BUILD_COMMANDS}"
                         echo "Test commands: ${env.MAVEN_TEST_COMMANDS}"
+
+                        // Extract scheduling metrics if present
+                        if (result.scheduling) {
+                            env.CARBON_INTENSITY = result.scheduling.current_intensity?.toString() ?: ''
+                            env.GREEN_PROBABILITY = result.scheduling.green_probability?.toString() ?: ''
+                            env.SCHEDULING_ACTION = result.scheduling.action ?: ''
+                            env.SCHEDULING_ENGINE = result.scheduling.engine ?: ''
+                        } else {
+                            env.CARBON_INTENSITY = ''
+                            env.GREEN_PROBABILITY = ''
+                            env.SCHEDULING_ACTION = ''
+                            env.SCHEDULING_ENGINE = ''
+                        }
                     } else {
                         env.OPTIMIZER_STATUS = 'no_changes'
                         env.MAVEN_BUILD_COMMANDS = ''
