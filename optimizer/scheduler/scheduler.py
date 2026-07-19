@@ -116,6 +116,8 @@ def run_scheduler(
 
         result = predictor.predict(ci_history=ci_history, now=now, forecast=forecast)
         result["current_intensity"] = current_intensity
+        result["carbon_history"] = _serialize_history(ci_history, now)
+        result["carbon_forecast"] = forecast
         return result
 
     except PredictorUnavailableError as exc:
@@ -139,12 +141,43 @@ def run_scheduler(
     result = engine.decide(features)
     result["engine"] = "rule_based"
     result["current_intensity"] = current_intensity
+    result["carbon_history"] = _serialize_history(ci_history, now)
+    result["carbon_forecast"] = forecast
     return result
 
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+def _serialize_history(
+    ci_history: list[float],
+    now: datetime,
+) -> list[dict]:
+    """Convert a flat list of CI floats into timestamped dicts for the dashboard.
+
+    Parameters
+    ----------
+    ci_history:
+        Ordered float list from the history store, **oldest first**.
+        The last element corresponds to *now*.
+    now:
+        The datetime of the most recent reading.
+
+    Returns
+    -------
+    list[dict]
+        Each dict has ``timestamp`` (ISO-8601 string) and ``intensity`` (float).
+    """
+    n = len(ci_history)
+    return [
+        {
+            "timestamp": (now - timedelta(hours=(n - 1 - i))).isoformat(),
+            "intensity": float(ci_history[i]),
+        }
+        for i in range(n)
+    ]
+
 
 def _backfill_history(store: CarbonHistoryStore, provider: CarbonDataProvider) -> None:
     """Attempt to backfill the store with the last 168 hours from the provider.

@@ -24,6 +24,7 @@ automatically selects the real provider when an API key is available::
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from abc import ABC, abstractmethod
@@ -67,36 +68,50 @@ class CarbonDataProvider(ABC):
 # ---------------------------------------------------------------------------
 
 class MockCarbonDataProvider(CarbonDataProvider):
-    """Hard-coded carbon data for development and offline testing.
+    """Synthetic carbon data for development and offline testing.
 
-    The mock uses a current intensity of 320 gCO₂eq/kWh with a falling
-    forecast (simulating a green window in 3 hours).  History returns
-    a flat series at the same value, sufficient for feature computation.
+    Generates a realistic sinusoidal day/night pattern:
+    - Peak intensity (~420 gCO₂/kWh) during midday (12:00)
+    - Trough intensity (~160 gCO₂/kWh) at night (00:00)
+    This simulates a grid with higher fossil-fuel usage during peak demand
+    and more renewables overnight, giving the ML model and charts
+    meaningful variation to work with.
     """
 
-    _MOCK_CURRENT: float = 320.0
-    _MOCK_HISTORY_VALUE: float = 310.0
+    _BASE: float = 290.0      # midpoint gCO₂/kWh
+    _AMPLITUDE: float = 130.0  # peak deviation
+
+    def _intensity_at(self, dt: datetime) -> float:
+        """Return synthetic intensity for a given datetime."""
+        # Hour-of-day sinusoid: peak at 12:00, trough at 00:00
+        hour_rad = (dt.hour + dt.minute / 60.0) / 24.0 * 2 * math.pi
+        # Day-of-week variation: slightly greener on weekends
+        dow_factor = 0.9 if dt.weekday() >= 5 else 1.0
+        # Small random-looking variation based on day-of-year
+        noise = 20.0 * math.sin(dt.timetuple().tm_yday / 7.0 * math.pi)
+        raw = self._BASE + self._AMPLITUDE * math.sin(hour_rad - math.pi / 2)
+        return max(80.0, raw * dow_factor + noise)
 
     def get_current_intensity(self) -> float:
-        """Return a mock current carbon intensity."""
-
-        return self._MOCK_CURRENT
+        """Return a synthetic current carbon intensity."""
+        return round(self._intensity_at(datetime.now()), 1)
 
     def get_forecast(self) -> list[dict[str, Any]]:
-        """Return a mock three-hour forecast."""
-
+        """Return a 6-hour forecast showing the upcoming sinusoidal trend."""
+        now = datetime.now()
         return [
-            {"hour": 1, "intensity": 300.0},
-            {"hour": 2, "intensity": 250.0},
-            {"hour": 3, "intensity": 180.0},
+            {
+                "hour": h,
+                "intensity": round(self._intensity_at(now + timedelta(hours=h)), 1),
+            }
+            for h in range(1, 7)
         ]
 
     def get_history(self, hours: int = 168) -> list[tuple[datetime, float]]:
-        """Return a synthetic flat history for the last *hours* hours."""
-
-        now = datetime.now()
+        """Return a synthetic sinusoidal history for the last *hours* hours."""
+        now = datetime.now().replace(minute=0, second=0, microsecond=0)
         return [
-            (now - timedelta(hours=h), self._MOCK_HISTORY_VALUE)
+            (now - timedelta(hours=h), round(self._intensity_at(now - timedelta(hours=h)), 1))
             for h in range(hours, 0, -1)   # oldest first
         ]
 
