@@ -48,7 +48,7 @@ class MavenConfig:
 
     executable: str = "mvn"
     group_id: str | None = None
-    also_make: bool = True
+    also_make: bool = False
     also_make_tests: bool = False
     extra_args: tuple[str, ...] = ()
     build_goals: tuple[str, ...] = ("clean", "install")
