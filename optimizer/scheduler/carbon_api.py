@@ -87,8 +87,11 @@ class MockCarbonDataProvider(CarbonDataProvider):
         hour_rad = (dt.hour + dt.minute / 60.0) / 24.0 * 2 * math.pi
         # Day-of-week variation: slightly greener on weekends
         dow_factor = 0.9 if dt.weekday() >= 5 else 1.0
-        # Small random-looking variation based on day-of-year
-        noise = 20.0 * math.sin(dt.timetuple().tm_yday / 7.0 * math.pi)
+        
+        # Deterministic hourly pseudo-random noise (-25 to +25)
+        hour_seed = int(dt.timestamp() // 3600)
+        noise = (hash(str(hour_seed)) % 50) - 25.0
+        
         raw = self._BASE + self._AMPLITUDE * math.sin(hour_rad - math.pi / 2)
         return max(80.0, raw * dow_factor + noise)
 
