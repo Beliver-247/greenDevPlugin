@@ -50,12 +50,33 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     try:
+        import os
+        
+        def resolve_base(cli_base: str | None) -> str | None:
+            if cli_base:
+                return cli_base
+            prev_succ = os.environ.get("GIT_PREVIOUS_SUCCESSFUL_COMMIT")
+            if prev_succ and prev_succ != "null":
+                return prev_succ
+            prev = os.environ.get("GIT_PREVIOUS_COMMIT")
+            if prev and prev != "null":
+                return prev
+            return None
+            
+        def resolve_head(cli_head: str | None) -> str | None:
+            if cli_head:
+                return cli_head
+            git_commit = os.environ.get("GIT_COMMIT")
+            if git_commit and git_commit != "null":
+                return git_commit
+            return None
+            
         config_path = resolve_config_path(args.config, project_root)
         config = load_config(config_path, project_root)
         config = apply_cli_overrides(
             config,
-            base_ref=args.base,
-            head_ref=args.head,
+            base_ref=resolve_base(args.base),
+            head_ref=resolve_head(args.head),
             dry_run=args.dry_run,
             output_format=args.output_format,
         )

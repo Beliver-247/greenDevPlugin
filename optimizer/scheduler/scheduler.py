@@ -204,11 +204,32 @@ def _backfill_history(store: CarbonHistoryStore, provider: CarbonDataProvider) -
             f"({n_missing} hours) — this may take a moment..."
         )
         readings = provider.get_history(hours=n_missing)
+        
+        # If the API (e.g. Free Tier) returned fewer hours than we need,
+        # seamlessly pad the older history with our randomized mock data.
+        if len(readings) < n_missing:
+            remaining = n_missing - len(readings)
+            print(f"[GreenOptimizer] 🔌  API provided {len(readings)} hours. Padding older {remaining} hours with synthetic mock data.")
+            from .carbon_api import MockCarbonDataProvider
+            mock_readings = MockCarbonDataProvider().get_history(hours=remaining)
+            
+            # Since mock_readings are oldest-first and readings are oldest-first,
+            # we prepend the mock readings to the real readings.
+            # But wait, MockCarbonDataProvider.get_history(hours=remaining) gives the 
+            # *most recent* `remaining` hours relative to NOW. To make them continuous,
+            # we must shift the mock readings back in time by len(readings) hours.
+            shifted_mock = []
+            shift_td = timedelta(hours=len(readings))
+            for dt, val in mock_readings:
+                shifted_mock.append((dt - shift_td, val))
+                
+            readings = shifted_mock + readings
+
         if readings:
             store.bulk_append(readings)
             print(
                 f"[GreenOptimizer] ✅  Backfill complete: {len(readings)} readings added "
-                f"(store now has {len(store)} entries)."
+                f"(oldest: {readings[0][0].isoformat()})"
             )
         else:
             print("[GreenOptimizer] ℹ  Backfill returned no data.")

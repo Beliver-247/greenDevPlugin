@@ -97,11 +97,13 @@ class MockCarbonDataProvider(CarbonDataProvider):
 
     def get_current_intensity(self) -> float:
         """Return a synthetic current carbon intensity."""
-        return round(self._intensity_at(datetime.now()), 1)
+        from datetime import timezone
+        return round(self._intensity_at(datetime.now(timezone.utc)), 1)
 
     def get_forecast(self) -> list[dict[str, Any]]:
         """Return a 6-hour forecast showing the upcoming sinusoidal trend."""
-        now = datetime.now()
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
         return [
             {
                 "hour": h,
@@ -112,7 +114,8 @@ class MockCarbonDataProvider(CarbonDataProvider):
 
     def get_history(self, hours: int = 168) -> list[tuple[datetime, float]]:
         """Return a synthetic sinusoidal history for the last *hours* hours."""
-        now = datetime.now().replace(minute=0, second=0, microsecond=0)
+        from datetime import timezone
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
         return [
             (now - timedelta(hours=h), round(self._intensity_at(now - timedelta(hours=h)), 1))
             for h in range(hours, 0, -1)   # oldest first
@@ -203,50 +206,34 @@ class ElectricityMapsProvider(CarbonDataProvider):
         return result
 
     def get_history(self, hours: int = 168) -> list[tuple[datetime, float]]:
-        """Fetch the last *hours* hourly readings via ``/v4/carbon-intensity/past``.
+        """Fetch the last 24 hourly readings via ``/v4/carbon-intensity/history``.
 
-        The Electricity Maps ``/past`` endpoint is per-timestamp, so this
-        method iterates hourly timestamps and issues one request per hour.
-        A short delay (``request_delay_s``) is applied between requests to
-        avoid rate-limiting.
-
-        Parameters
-        ----------
-        hours:
-            Number of past hourly readings to retrieve (max 168).
-
-        Returns
-        -------
-        list[tuple[datetime, float]]
-            ``(timestamp, intensity)`` tuples, **oldest first**.
+        (The free tier /history endpoint returns 24 hours of data in one call,
+        so the `hours` parameter is effectively capped at 24).
         """
 
-        url = f"{self.BASE_URL}/carbon-intensity/past"
-        results: list[tuple[datetime, float]] = []
-        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-
-        for h in range(hours, 0, -1):   # oldest → newest
-            target = now - timedelta(hours=h)
-            try:
-                data = self._get(
-                    url,
-                    params={
-                        "zone": self._zone,
-                        "datetime": target.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    },
-                )
-                intensity = float(data["carbonIntensity"])
-                results.append((target, intensity))
-            except Exception as exc:  # noqa: BLE001
-                # Skip individual failed hours rather than aborting the whole backfill
-                print(
-                    f"[GreenOptimizer]   ⚠  Could not fetch history for "
-                    f"{target.isoformat()}: {exc}"
-                )
-            if self._delay > 0:
-                time.sleep(self._delay)
-
-        return results
+        url = f"{self.BASE_URL}/carbon-intensity/history"
+        try:
+            data = self._get(url, params={"zone": self._zone})
+            history_entries = data.get("history", [])
+            
+            results: list[tuple[datetime, float]] = []
+            for entry in history_entries:
+                dt_str = entry.get("datetime")
+                intensity = float(entry.get("carbonIntensity", 0.0))
+                if dt_str:
+                    try:
+                        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+                        results.append((dt, intensity))
+                    except ValueError:
+                        pass
+            
+            # Sort oldest to newest
+            results.sort(key=lambda x: x[0])
+            return results
+        except Exception as exc:  # noqa: BLE001
+            print(f"[GreenOptimizer]   ⚠  Could not fetch history: {exc}")
+            return []
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -277,7 +264,10 @@ class ElectricityMapsProvider(CarbonDataProvider):
 
             req = urllib.request.Request(
                 url,
-                headers={"auth-token": self._api_key},
+                headers={
+                    "auth-token": self._api_key,
+                    "User-Agent": "GreenOptimizer/1.0"
+                },
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 import json
