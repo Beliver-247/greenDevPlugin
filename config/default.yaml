@@ -57,11 +57,6 @@ maven:
     - test
   run_build: true
   run_tests: true
-  run_integration_tests: true
-  also_make_integration_tests: false
-  integration_test_goals:
-    - failsafe:integration-test
-    - failsafe:verify
 
 output:
   format: json

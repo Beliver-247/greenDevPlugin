@@ -55,9 +55,6 @@ class MavenConfig:
     test_goals: tuple[str, ...] = ("test",)
     run_build: bool = True
     run_tests: bool = True
-    run_integration_tests: bool = False
-    also_make_integration_tests: bool = False
-    integration_test_goals: tuple[str, ...] = ("verify",)
 
 
 @dataclass(frozen=True)
@@ -292,9 +289,6 @@ def _parse_maven(default: MavenConfig, data: Mapping[str, Any]) -> MavenConfig:
         test_goals=tuple(_as_str_list(data.get("test_goals", default.test_goals))),
         run_build=_as_bool(data.get("run_build", default.run_build), "maven.run_build"),
         run_tests=_as_bool(data.get("run_tests", default.run_tests), "maven.run_tests"),
-        run_integration_tests=_as_bool(data.get("run_integration_tests", default.run_integration_tests), "maven.run_integration_tests"),
-        also_make_integration_tests=_as_bool(data.get("also_make_integration_tests", default.also_make_integration_tests), "maven.also_make_integration_tests"),
-        integration_test_goals=tuple(_as_str_list(data.get("integration_test_goals", default.integration_test_goals))),
     )
 
 

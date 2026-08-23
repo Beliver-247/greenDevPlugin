@@ -61,11 +61,6 @@ def build_maven_actions(
         if config.also_make_tests:
             test_args.append("-am")
         actions.append(MavenAction(name="test", command=[*test_args, *config.test_goals]))
-    if config.run_integration_tests and config.integration_test_goals:
-        it_args = [*base_args]
-        if config.also_make_integration_tests:
-            it_args.append("-am")
-        actions.append(MavenAction(name="integration-test", command=[*it_args, *config.integration_test_goals]))
 
     return actions
 
